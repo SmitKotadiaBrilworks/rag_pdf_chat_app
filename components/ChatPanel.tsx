@@ -4,6 +4,13 @@ import { useEffect, useRef, useState, type SubmitEvent } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 
+type IndexedDoc = {
+  namespace: string;
+  fileName: string;
+  pages: number;
+  chunks: number;
+};
+
 function messageText(parts: { type: string; text?: string }[]): string {
   return parts
     .filter((part): part is { type: "text"; text: string } => part.type === "text")
@@ -11,17 +18,15 @@ function messageText(parts: { type: string; text?: string }[]): string {
     .join("");
 }
 
-/**
- * The parent mounts this component with `key={namespace}`, so each newly
- * indexed PDF gets its own instance — a fresh `useChat` session whose
- * transport sends a fixed `namespace` with every request. That's also the
- * right UX: a new document means a new conversation grounded in new content.
- */
-export function ChatPanel({ namespace, fileName }: { namespace: string | null; fileName: string | null }) {
+export function ChatPanel({ docs }: { docs: IndexedDoc[] }) {
   const [input, setInput] = useState("");
 
   const [transport] = useState(
-    () => new DefaultChatTransport({ api: "/api/chat", body: { namespace } }),
+    () =>
+      new DefaultChatTransport({
+        api: "/api/chat",
+        body: { docs: docs.map(({ namespace, fileName }) => ({ namespace, fileName })) },
+      }),
   );
 
   const { messages, sendMessage, status, error } = useChat({ transport });
@@ -31,8 +36,16 @@ export function ChatPanel({ namespace, fileName }: { namespace: string | null; f
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const hasDoc = docs.length > 0;
   const ready = status === "ready" || status === "error";
-  const canSend = Boolean(namespace) && ready && input.trim().length > 0;
+  const canSend = hasDoc && ready && input.trim().length > 0;
+
+  const docLabel =
+    docs.length === 0
+      ? null
+      : docs.length === 1
+        ? `"${docs[0].fileName}"`
+        : `${docs.length} documents`;
 
   function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,8 +59,8 @@ export function ChatPanel({ namespace, fileName }: { namespace: string | null; f
       <div className="border-b border-zinc-200 p-6 dark:border-zinc-800">
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">2. Ask questions</h2>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          {namespace
-            ? `Answers are grounded in “${fileName}” — retrieved passages are sent to Gemini as context.`
+          {docLabel
+            ? `Answers are grounded in ${docLabel} — retrieved passages are sent to Gemini as context.`
             : "Upload a PDF first — the chat is grounded in its content."}
         </p>
       </div>
@@ -76,8 +89,8 @@ export function ChatPanel({ namespace, fileName }: { namespace: string | null; f
         <input
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder={namespace ? "Ask something about the document…" : "Upload a PDF to get started"}
-          disabled={!namespace}
+          placeholder={hasDoc ? "Ask something about the document…" : "Upload a PDF to get started"}
+          disabled={!hasDoc}
           className="flex-1 rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-50"
         />
         <button
